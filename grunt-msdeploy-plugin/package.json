@@ -1,0 +1,13 @@
+{
+  "name": "grunt-msdeploy",
+  "version": "0.1.0",
+  "description": "> Using Grunt",
+  "keywords": [
+    "gruntplugin",
+    "msdeploy"
+  ],
+  "dependencies": {
+       "grunt": "~0.4.2",
+       "mustache": "~0.8.1"
+  }
+}
