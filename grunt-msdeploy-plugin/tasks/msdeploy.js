@@ -10,45 +10,43 @@ module.exports = function (grunt) {
 
     var callback = function(async, error, stdout, stderr) {
         console.log('stdout: ' + stdout);
-        console.log('stderr: ' + stderr);
         if (error !== null) {
+            console.log('stderr: ' + stderr);
             console.log('exec error: ' + error);
             async(false);
         }
         async();
     };
 
+    var createAbsolutePath = function() {
+        return function (path, render) {
+            return process.cwd() + '\\' + render(path) + '\\';
+        }
+    };
+
     var gruntOptions = {
         stdout: true,
         stderr: true,
         failOnError: true,
+        verbosity: 'normal',
         execOptions: {}
     };
-
-    /*var options = this.options({
-     stdout: false,
-     stderr: true,
-     targets: ['Build'],
-     buildParameters: {},
-     failOnError: true,
-     verbosity: 'normal',
-     processor: '',
-     version: 4.0,
-     nologo: true
-     });*/
 
     grunt.registerTask('archive', 'Archive IIS manifest', function () {
         var async = this.async();
         var options = this.options(gruntOptions);
 
-        var parameters = grunt.config('msdeploy.all.locations');
-        if (parameters.manifest.length === 0) {
+        var config = grunt.config('msdeploy');
+
+        if (config.files.manifest.length === 0) {
             console.log('Manifest is empty');
         }
 
-        var script = "{{& msdeploy}} -verb:sync -disableLink:ContentExtension -source:manifest={{& manifest}} -dest:archiveDir={{& archive}}";
+        config.files.manifest = process.cwd() + '\\' + config.files.manifest;
 
-        script = mustache.render(script, parameters);
+        var script = "{{& dir.ms_deploy}}msdeploy.exe -verb:sync -disableLink:ContentExtension -source:manifest={{& files.manifest}} -dest:archiveDir={{& dir.archive}}";
+
+        script = mustache.render(script, config);
         var asyncCallback = function(error, stdout, stderr){
             callback(async, error, stdout, stderr)
         };
@@ -57,63 +55,75 @@ module.exports = function (grunt) {
     });
 
     grunt.registerTask('create-parameters-file', 'Create Parameters File', function (env) {
-        var environment = grunt.config('msdeploy.' + env.toString());
-        var parameters = grunt.config('msdeploy.all.locations');
+        var config = grunt.config('msdeploy');
+        var appRoot = process.cwd();
+        var template = appRoot + '/' + config.dir.parameters + '/' + config.files.parameters.template;
 
-        var output = fs.readFileSync(parameters.template, {encoding : 'utf8'});
-        output = mustache.render(output, environment);
+        var output = fs.readFileSync(template, {encoding : 'utf8'});
 
-        fs.writeFileSync(parameters.parameters, output);
+        output = mustache.render(output, config.environments[env].parameters);
+
+        var parameterOutput = appRoot + '/' + config.dir.parameters + '/parameters.xml';
+
+        fs.writeFileSync(parameterOutput, output);
     });
 
-    grunt.registerTask('package-config', 'Deploy Package Configuration', function(env){
+    grunt.registerTask('package-config', 'Deploy Package Configuration', function(){
         var async = this.async();
         var options = this.options(gruntOptions);
 
-        var parameters = grunt.config('msdeploy.all.locations');
+        var config = grunt.config('msdeploy');
+        config.absolute = createAbsolutePath;
 
-        var script = "{{& msdeploy}} -verb:sync -source:archiveDir={{& archive}} -dest:package={{& configpackage}} -declareParamFile=\"{{& declaredparameters}}\"";
-        script = mustache.render(script, parameters);
+        if (fs.existsSync(path)) {
+            fs.mkdirSync(config.dir.packages);
+        }
+
+        var script = "{{& dir.ms_deploy}}msdeploy.exe -verb:sync -source:archiveDir={{#absolute}}{{& dir.archive}}{{/absolute}} -dest:package={{& dir.packages}}\\config-package.zip -declareParamFile=\"{{& dir.parameters}}/{{& files.parameters.declared}}\"";
+        script = mustache.render(script, config);
 
         var cp = exec(script, options.execOptions, function(error, stdout, stderr){callback(async, error, stdout, stderr)});
     });
 
-    grunt.registerTask('msdeploy-deployer-config', 'Deploy Configuration Package', function () {
-        var async = this.async();
-        var options = this.options(gruntOptions);
-
-        var parameters = grunt.config('msdeploy.all.locations');
-
-        var script = "{{& msdeploy}} -verb:sync -source:package={{& configpackage}} -dest:auto=true -setParamFile=\"{{& parameters}}\"";
-        script = mustache.render(script, parameters);
-
-        var cp = exec(script, options.execOptions, function(error, stdout, stderr){callback(async, error, stdout, stderr)});
-    });
 
     grunt.registerTask('package-content', 'Package website content', function () {
         var async = this.async();
         var options = this.options(gruntOptions);
 
-        var parameters = grunt.config('msdeploy.all.locations');
+        var config = grunt.config('msdeploy');
+        config.absolute = createAbsolutePath;
 
-        var script = "{{& msdeploy}} -verb:sync -source:contentPath={{& build}} -dest:package={{& contentpackage}}";
-        script = mustache.render(script, parameters);
+        var script = "{{& dir.ms_deploy}}msdeploy.exe -verb:sync -source:contentPath={{#absolute}}{{& dir.build}}{{/absolute}} -dest:package={{& dir.packages}}\\content-package.zip";
+        script = mustache.render(script, config);
 
         var cp = exec(script, options.execOptions, function(error, stdout, stderr){callback(async, error, stdout, stderr)});
 
     });
 
-    grunt.registerTask('deploye-content', 'Deploy website content', function () {
+    grunt.registerTask('deploy-config', 'Deploy Configuration Package', function (env) {
         var async = this.async();
         var options = this.options(gruntOptions);
 
-        var parameters = grunt.config('msdeploy.all.locations');
+        var config = grunt.config('msdeploy');
+        config.current_environment = config.environments[env];
 
-        var script = "{{& msdeploy}} -verb:sync -source:package={{& contentpackage}} -dest:contentPath=\"{{& publishpath}}\",computerName={{& server}}";
-        script = mustache.render(script, parameters);
+        var script = "{{& dir.ms_deploy}}msdeploy.exe -verb:sync -source:package={{& dir.packages}}\\config-package.zip -dest:auto={{& current_environment.config_deploy_path}},computerName={{& current_environment.server}} -setParamFile=\"{{& dir.parameters}}/parameters.xml\"";
+        script = mustache.render(script, config);
 
         var cp = exec(script, options.execOptions, function(error, stdout, stderr){callback(async, error, stdout, stderr)});
+    });
 
+    grunt.registerTask('deploy-content', 'Deploy website content', function (env) {
+        var async = this.async();
+        var options = this.options(gruntOptions);
+
+        var config = grunt.config('msdeploy');
+        config.current_environment = config.environments[env];
+
+        var script = "{{& dir.ms_deploy}}msdeploy.exe -verb:sync -source:package={{& dir.packages}}\\content-package.zip -dest:contentPath=\"{{& current_environment.deploy_path}}\",computerName={{& current_environment.server}}";
+        script = mustache.render(script, config);
+
+        var cp = exec(script, options.execOptions, function(error, stdout, stderr){callback(async, error, stdout, stderr)});
     });
 
 };
